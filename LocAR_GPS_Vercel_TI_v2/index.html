@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <title>LocAR GPS - Laboratorio de Redes</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin:0; width:100%; height:100%; overflow:hidden; font-family:Arial,sans-serif; background:#000; }
+    #ar-canvas { position:fixed; inset:0; width:100%; height:100%; display:block; }
+    #panel {
+      position:fixed; z-index:10; top:12px; left:12px; right:12px;
+      background:rgba(0,0,0,.72); color:#fff; border-radius:12px; padding:12px;
+      font-size:14px; line-height:1.4;
+    }
+    #panel b { font-size:17px; }
+    #start {
+      width:100%; margin-top:10px; padding:13px; border:0; border-radius:9px;
+      font-size:17px; font-weight:bold; background:white; color:black;
+    }
+    #status { margin-top:8px; }
+    #legend {
+      position:fixed; z-index:10; left:12px; right:12px; bottom:12px;
+      background:rgba(0,0,0,.72); color:white; border-radius:12px; padding:10px; font-size:12px;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="ar-canvas"></canvas>
+
+  <div id="panel">
+    <b>AR por ubicación — LocAR.js</b><br>
+    <span id="coords">GPS: todavía no iniciado</span><br>
+    <span id="accuracy">Precisión: —</span><br>
+    <span id="distance">Distancia al Laboratorio: —</span>
+    <div id="status">Pulsa “INICIAR AR” y acepta los permisos.</div>
+    <button id="start">INICIAR AR</button>
+  </div>
+
+  <div id="legend">
+    Calibración: rojo=Norte, amarillo=Sur, celeste=Oeste, verde=Este.
+    Magenta=“Laboratorio de Redes”.
+  </div>
+
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
