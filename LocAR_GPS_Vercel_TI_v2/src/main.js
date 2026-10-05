@@ -8,7 +8,6 @@ const accuracyEl = document.getElementById("accuracy");
 const distanceEl = document.getElementById("distance");
 const canvas = document.getElementById("ar-canvas");
 
-// Coordenada del Laboratorio de Redes
 const TARGET = {
   lat: -2.291122,
   lon: -78.1141843,
@@ -17,7 +16,7 @@ const TARGET = {
 
 function setStatus(msg) {
   statusEl.textContent = msg;
-  console.log("[ESTADO]", msg); // Añadido para depuración
+  console.log("[ESTADO]", msg);
 }
 
 function haversineMeters(lat1, lon1, lat2, lon2) {
@@ -46,21 +45,29 @@ btn.addEventListener("click", async () => {
   try {
     const app = new App({
       canvas,
+      // ✅ FIX 1: Forzar el video de fondo desde el constructor
+      showVideoBackground: true,
       cameraOptions: {
         hFov: 80,
         near: 0.001,
-        far: 2000
+        far: 500            // ✅ FIX 2: antes 2000. Reduce carga del GPU.
       },
       videoConstraints: {
-        video: { facingMode: "environment" }
+        video: {
+          facingMode: "environment",
+          // ✅ FIX 3: Forzar resolución baja para que vaya fluido
+          width:  { ideal: 640 },
+          height: { ideal: 480 }
+        }
       }
     });
 
-    // ✅ CORRECCIÓN 1: Usar el evento 'webcamstarted' para mostrar el video.
-    //    Esta es la forma correcta en LocAR.js, 'showVideoBackground' está obsoleto.
+    // ✅ FIX 4: Backup. Si el evento existe, asignamos la textura manualmente.
     app.on("webcamstarted", (ev) => {
-      console.log("Cámara iniciada correctamente.");
-      app.scene.background = ev.texture;
+      console.log("Cámara iniciada (evento).");
+      if (ev && ev.texture) {
+        app.scene.background = ev.texture;
+      }
     });
 
     app.on("webcamerror", (err) => {
@@ -70,11 +77,28 @@ btn.addEventListener("click", async () => {
 
     const locar = await app.start();
 
-    // ✅ CORRECCIÓN 2: Desactivar 'enableHighAccuracy'.
-    //    Muchos dispositivos Android fallan al pedir ubicación de alta precisión.
-    //    Con 'false' es más compatible y funciona para este propósito.
+    // ✅ FIX 5: Si después de arrancar existe el elemento <video>, forzamos el fondo.
+    if (app.video) {
+      try {
+        const videoTexture = new THREE.VideoTexture(app.video);
+        videoTexture.minFilter = THREE.LinearFilter;
+        videoTexture.magFilter = THREE.LinearFilter;
+        videoTexture.generateMipmaps = false;
+        app.scene.background = videoTexture;
+        console.log("Fondo de video asignado manualmente.");
+      } catch (err) {
+        console.warn("No se pudo asignar el fondo de video:", err);
+      }
+    }
+
+    // ✅ FIX 6: Reducir el pixel ratio a 1 para acelerar el render en móvil.
+    if (app.renderer) {
+      app.renderer.setPixelRatio(1);
+      console.log("Pixel ratio ajustado a 1.");
+    }
+
     locar.setGpsOptions({
-      enableHighAccuracy: false, // <-- CAMBIO CRÍTICO
+      enableHighAccuracy: false,
       maximumAge: 0,
       timeout: 30000
     });
@@ -104,29 +128,21 @@ btn.addEventListener("click", async () => {
         `Distancia al Laboratorio: ${Math.round(dist)} m`;
 
       if (!objectsAdded) {
-        // Cubo magenta en la ubicación exacta del laboratorio.
         const targetBox = makeBox(0xff00ff, 12);
         locar.add(targetBox, TARGET.lon, TARGET.lat, 6);
 
-        // ✅ CORRECCIÓN 3: Reducir la distancia de los cubos de referencia.
-        //    Estaban a ~55 metros (0.0005), ahora a ~11 metros (0.0001).
-        const offset = 0.0001; // <-- CAMBIO CLAVE
+        const offset = 0.0001;
 
         const refs = [
-          { dLat:  offset, dLon:  0,      color: 0xff0000 }, // Norte
-          { dLat: -offset, dLon:  0,      color: 0xffff00 }, // Sur
-          { dLat:  0,      dLon: -offset, color: 0x00ffff }, // Oeste
-          { dLat:  0,      dLon:  offset, color: 0x00ff00 }  // Este
+          { dLat:  offset, dLon:  0,      color: 0xff0000 },
+          { dLat: -offset, dLon:  0,      color: 0xffff00 },
+          { dLat:  0,      dLon: -offset, color: 0x00ffff },
+          { dLat:  0,      dLon:  offset, color: 0x00ff00 }
         ];
 
         for (const r of refs) {
           const box = makeBox(r.color, 10);
-          locar.add(
-            box,
-            c.longitude + r.dLon,
-            c.latitude + r.dLat,
-            5
-          );
+          locar.add(box, c.longitude + r.dLon, c.latitude + r.dLat, 5);
         }
 
         objectsAdded = true;
