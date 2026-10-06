@@ -8,6 +8,7 @@ const accuracyEl = document.getElementById("accuracy");
 const distanceEl = document.getElementById("distance");
 const canvas = document.getElementById("ar-canvas");
 
+// Coordenada del Laboratorio de Redes
 const TARGET = {
   lat: -2.291135,
   lon: -78.114209,
@@ -25,8 +26,8 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
   const p1 = toRad(lat1), p2 = toRad(lat2);
   const dp = toRad(lat2 - lat1);
   const dl = toRad(lon2 - lon1);
-  const a = Math.sin(dp/2)**2 +
-            Math.cos(p1) * Math.cos(p2) * Math.sin(dl/2)**2;
+  const a = Math.sin(dp / 2) ** 2 +
+            Math.cos(p1) * Math.cos(p2) * Math.sin(dl / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
@@ -37,6 +38,8 @@ function makeBox(color, size = 10) {
   );
 }
 
+// Rumbo (bearing) desde el usuario hacia el objetivo
+// 0=Norte, 90=Este, 180=Sur, 270=Oeste
 function getBearingToTarget(userLat, userLon, targetLat, targetLon) {
   const toRad = d => d * Math.PI / 180;
   const toDeg = r => r * 180 / Math.PI;
@@ -55,6 +58,9 @@ btn.addEventListener("click", async () => {
   setStatus("Solicitando cámara y sensores...");
 
   try {
+    // ============================================================
+    // 1) INICIALIZAR LOCAR
+    // ============================================================
     const app = new App({
       canvas,
       showVideoBackground: true,
@@ -83,6 +89,7 @@ btn.addEventListener("click", async () => {
 
     const locar = await app.start();
 
+    // Fondo de video manual (respaldo)
     if (app.video) {
       try {
         const videoTexture = new THREE.VideoTexture(app.video);
@@ -99,7 +106,9 @@ btn.addEventListener("click", async () => {
       app.renderer.setPixelRatio(1);
     }
 
-    // Buscar la cámara 3D
+    // ============================================================
+    // 2) BUSCAR LA CÁMARA 3D DE THREE.JS
+    // ============================================================
     let camera3D = null;
     if (app.scene && app.scene.camera) camera3D = app.scene.camera;
     else if (app.camera) camera3D = app.camera;
@@ -109,9 +118,9 @@ btn.addEventListener("click", async () => {
       });
     }
 
-    // ============================================
-    // COMPÁS HUD: 4 cuadros alrededor de la flecha
-    // ============================================
+    // ============================================================
+    // 3) COMPÁS HUD: 4 CUADROS ALREDEDOR DE LA FLECHA
+    // ============================================================
     const compassWrap = document.createElement("div");
     compassWrap.style.cssText = `
       position: fixed;
@@ -124,7 +133,6 @@ btn.addEventListener("click", async () => {
       transform: translate3d(-50%, 0, 0);
     `;
 
-    // Cuadros cardinales alrededor del centro
     const CARDINALS = [
       { key: "N", label: "N", color: "#ff0000", angle: 0   },
       { key: "E", label: "E", color: "#00ff00", angle: 90  },
@@ -161,7 +169,7 @@ btn.addEventListener("click", async () => {
       c.el = box;
     });
 
-    // Flecha central (rotará para apuntar al LAB)
+    // Flecha central
     const arrow = document.createElement("div");
     arrow.style.cssText = `
       position: absolute;
@@ -185,10 +193,11 @@ btn.addEventListener("click", async () => {
       </svg>
     `;
     compassWrap.appendChild(arrow);
-
     document.body.appendChild(compassWrap);
 
-    // Estado
+    // ============================================================
+    // 4) ESTADO Y VARIABLES
+    // ============================================================
     let lastUserLat = null;
     let lastUserLon = null;
     let lastDeg = null;
@@ -197,18 +206,18 @@ btn.addEventListener("click", async () => {
     const worldQuat = new THREE.Quaternion();
     const forwardVec = new THREE.Vector3();
 
+    // ============================================================
+    // 5) BUCLE DE ACTUALIZACIÓN DEL COMPÁS Y LA FLECHA (10 FPS)
+    // ============================================================
     setInterval(() => {
       if (!camera3D || lastUserLat === null) return;
 
-      // ============================================================
-      // 1) HEADING DE LA CÁMARA (para rotar los cuadros N/S/E/O)
-      // ============================================================
+      // 5a) Heading de la cámara (rotación de los cuadros)
       camera3D.getWorldQuaternion(worldQuat);
       forwardVec.set(0, 0, -1).applyQuaternion(worldQuat);
       let camHeading = Math.atan2(forwardVec.x, -forwardVec.z) * 180 / Math.PI;
       camHeading = (camHeading + 360) % 360;
 
-      // Rotar los cuadros alrededor del centro
       if (lastHeading === null || Math.abs(camHeading - lastHeading) >= 0.5) {
         lastHeading = camHeading;
         CARDINALS.forEach(c => {
@@ -220,11 +229,7 @@ btn.addEventListener("click", async () => {
         });
       }
 
-      // ============================================================
-      // 2) ÁNGULO DE LA FLECHA USANDO LA POSICIÓN REAL DEL CUBO EN 3D
-      // ============================================================
-      // Esto garantiza que la flecha y el cubo SIEMPRE coincidan,
-      // sin importar qué convención use LocAR internamente.
+      // 5b) Ángulo de la flecha respecto al cubo 3D real
       let delta = 0;
 
       if (window.__targetBox && window.__targetBox.parent) {
@@ -234,11 +239,9 @@ btn.addEventListener("click", async () => {
         const camPos = new THREE.Vector3();
         camera3D.getWorldPosition(camPos);
 
-        // Vector horizontal desde la cámara hacia el cubo
         const toTarget = targetWorld.clone().sub(camPos);
         toTarget.y = 0;
 
-        // Vector forward de la cámara (horizontal)
         const camFwd = new THREE.Vector3();
         camera3D.getWorldDirection(camFwd);
         camFwd.y = 0;
@@ -246,24 +249,13 @@ btn.addEventListener("click", async () => {
         if (toTarget.lengthSq() > 0.0001 && camFwd.lengthSq() > 0.0001) {
           toTarget.normalize();
           camFwd.normalize();
-
-          // Ángulo firmado entre camFwd y toTarget en el plano horizontal.
-          // 0°   = el cubo está al frente
-          // +90° = el cubo está a la derecha
-          // -90° = el cubo está a la izquierda
-          // 180° = el cubo está detrás
           const cross = camFwd.x * toTarget.z - camFwd.z * toTarget.x;
           const dot   = camFwd.x * toTarget.x + camFwd.z * toTarget.z;
           delta = Math.atan2(cross, dot) * 180 / Math.PI;
-
-          // En el HUD, rotación positiva = flecha apunta a la derecha.
-          // Según la convención de arriba, un cross positivo significa que el
-          // objetivo está a la izquierda (por el eje Y invertido en pantalla).
-          // Probamos: si al apuntar al cubo el delta es +90, invertimos el signo.
           delta = -delta;
         }
       } else {
-        // Fallback por si el cubo no está disponible todavía
+        // Fallback si el cubo aún no está
         const targetBearing = getBearingToTarget(
           lastUserLat, lastUserLon, TARGET.lat, TARGET.lon
         );
@@ -272,14 +264,12 @@ btn.addEventListener("click", async () => {
         while (delta < -180) delta += 360;
       }
 
-      // Rotar la flecha solo si el ángulo cambió ≥ 1°
       const roundedDelta = Math.round(delta);
       if (lastDeg === null || Math.abs(roundedDelta - lastDeg) >= 1) {
         lastDeg = roundedDelta;
         arrow.style.transform = `rotate(${delta}deg)`;
       }
 
-      // Color de la flecha
       const arrowPath = arrow.querySelector("polygon");
       if (Math.abs(delta) < 15) {
         arrowPath.setAttribute("fill", "#00ff00");
@@ -289,9 +279,12 @@ btn.addEventListener("click", async () => {
 
       // Debug
       statusEl.textContent =
-        `Cam→ ${Math.round(camHeading)}°  Δ Flecha ${roundedDelta}°`;
+        `LAB→ ${Math.round(getBearingToTarget(lastUserLat, lastUserLon, TARGET.lat, TARGET.lon))}°  Cam→ ${Math.round(camHeading)}°  Δ ${roundedDelta}°`;
     }, 100);
 
+    // ============================================================
+    // 6) CONFIGURAR GPS
+    // ============================================================
     locar.setGpsOptions({
       enableHighAccuracy: false,
       maximumAge: 0,
@@ -308,6 +301,9 @@ btn.addEventListener("click", async () => {
       btn.textContent = "REINTENTAR";
     });
 
+    // ============================================================
+    // 7) EN CADA ACTUALIZACIÓN DE GPS
+    // ============================================================
     locar.on("gpsupdate", (ev) => {
       const c = ev.position.coords;
 
@@ -325,40 +321,49 @@ btn.addEventListener("click", async () => {
       distanceEl.textContent =
         `Distancia al Laboratorio: ${Math.round(dist)} m`;
 
-                 if (!objectsAdded) {
-        // ============================================
-        // CUBO 3D GEORREFERENCIADO DEL LABORATORIO
-        // ============================================
-        // ✅ LocAR espeja el eje E-O. Colocamos el cubo en la longitud
-        //    espejada respecto al usuario para que aparezca en la
-        //    dirección real correcta.
-        const userLon = c.longitude;
-        const userLat = c.latitude;
-        const mirroredLon = 2 * userLon - TARGET.lon;
+      if (!objectsAdded) {
+        // ---- Primera vez: crear los cubos con espejado E-O ----
+        const mirroredLon = 2 * c.longitude - TARGET.lon;
 
+        // Cubo magenta del LAB
         const targetBox = makeBox(0xff00ff, 6);
         targetBox.frustumCulled = false;
         window.__targetBox = targetBox;
         locar.add(targetBox, mirroredLon, TARGET.lat, 2);
 
-        // ============================================
-        // CUBO CERCANO DE REFERENCIA (~5 m al Norte real)
-        // ============================================
-        // Un cubo cercano para verificar la orientación al instante.
-        // Se coloca al norte real, que no está afectado por el espejado.
+        // Cubo azul de referencia cercano (~5 m al norte)
         const nearBox = makeBox(0x00aaff, 3);
         nearBox.frustumCulled = false;
         window.__nearBox = nearBox;
-        locar.add(
-          nearBox,
-          userLon,
-          userLat + 0.00005,
-          1.5
-        );
+        locar.add(nearBox, c.longitude, c.latitude + 0.00005, 1.5);
+
+        // Guardar la posición con la que se calculó
+        window.__lastUserLon = c.longitude;
+        window.__lastUserLat = c.latitude;
 
         objectsAdded = true;
-        setStatus("✅ Cubos añadidos. El magenta debe estar en la dirección de la flecha.");
+        setStatus("✅ Cubos añadidos. Esperando a que el GPS se estabilice…");
         btn.style.display = "none";
+
+      } else {
+        // ---- Actualizaciones posteriores: re-anclar si el GPS se movió ----
+        // Umbral 0.00003° ≈ 3.3 m
+        if (window.__targetBox && Math.abs(c.longitude - window.__lastUserLon) > 0.00003) {
+          const newMirroredLon = 2 * c.longitude - TARGET.lon;
+
+          locar.remove(window.__targetBox);
+          locar.add(window.__targetBox, newMirroredLon, TARGET.lat, 2);
+
+          if (window.__nearBox) {
+            locar.remove(window.__nearBox);
+            locar.add(window.__nearBox, c.longitude, c.latitude + 0.00005, 1.5);
+          }
+
+          window.__lastUserLon = c.longitude;
+          window.__lastUserLat = c.latitude;
+
+          console.log("[FIX] Cubo re-anclado con nueva posición GPS");
+        }
       }
     });
 
