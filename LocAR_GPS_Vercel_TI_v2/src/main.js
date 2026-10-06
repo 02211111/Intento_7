@@ -113,6 +113,7 @@ btn.addEventListener("click", async () => {
 
     // ✅ Flecha OPTIMIZADA: sin drop-shadow, sin transition,
     //    con will-change y translate3d para forzar aceleración por GPU.
+        // ✅ Flecha SVG: más clara, misma performance
     const arrow = document.createElement("div");
     arrow.id = "direction-arrow";
     arrow.style.cssText = `
@@ -120,15 +121,23 @@ btn.addEventListener("click", async () => {
       z-index: 15;
       bottom: 90px;
       left: 50%;
-      width: 0;
-      height: 0;
-      border-left: 18px solid transparent;
-      border-right: 18px solid transparent;
-      border-bottom: 32px solid #00ff00;
+      width: 60px;
+      height: 60px;
       pointer-events: none;
       will-change: transform;
       transform: translate3d(-50%, 0, 0) rotate(0deg);
-      transform-origin: 50% 60%;
+      transform-origin: 50% 50%;
+    `;
+    arrow.innerHTML = `
+      <svg viewBox="0 0 100 100" width="60" height="60" xmlns="http://www.w3.org/2000/svg">
+        <!-- Halo/sombra suave sin filter costoso -->
+        <circle cx="50" cy="50" r="46" fill="rgba(0,0,0,0.45)"/>
+        <!-- Anillo exterior -->
+        <circle cx="50" cy="50" r="44" fill="none" stroke="#ffffff" stroke-width="3"/>
+        <!-- Flecha: punta -->
+        <polygon points="50,12 72,50 60,50 60,88 40,88 40,50 28,50"
+                 fill="#00ff00" stroke="#003300" stroke-width="2" stroke-linejoin="round"/>
+      </svg>
     `;
     document.body.appendChild(arrow);
 
@@ -166,10 +175,12 @@ btn.addEventListener("click", async () => {
           `translate3d(-50%, 0, 0) rotate(${delta}deg)`;
       }
 
+           // ✅ Cambia el color del polígono de la flecha
+      const arrowPath = arrow.querySelector("polygon");
       if (Math.abs(delta) < 15) {
-        arrow.style.borderBottomColor = "#00ff00";
+        arrowPath.setAttribute("fill", "#00ff00");
       } else {
-        arrow.style.borderBottomColor = "#00aa44";
+        arrowPath.setAttribute("fill", "#aaffaa");
       }
 
       // Debug
