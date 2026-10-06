@@ -8,9 +8,10 @@ const accuracyEl = document.getElementById("accuracy");
 const distanceEl = document.getElementById("distance");
 const canvas = document.getElementById("ar-canvas");
 
+// ✅ Coordenada actualizada del Laboratorio
 const TARGET = {
-  lat: -2.291122,
-  lon: -78.1141843,
+  lat: -2.291135,
+  lon: -78.114209,
   name: "LABORATORIO DE REDES"
 };
 
@@ -37,6 +38,8 @@ function makeBox(color, size = 10) {
   );
 }
 
+// Rumbo (bearing) desde el usuario hacia el objetivo
+// 0=Norte, 90=Este, 180=Sur, 270=Oeste
 function getBearingToTarget(userLat, userLon, targetLat, targetLon) {
   const toRad = d => d * Math.PI / 180;
   const toDeg = r => r * 180 / Math.PI;
@@ -111,9 +114,7 @@ btn.addEventListener("click", async () => {
       });
     }
 
-    // ✅ Flecha OPTIMIZADA: sin drop-shadow, sin transition,
-    //    con will-change y translate3d para forzar aceleración por GPU.
-        // ✅ Flecha SVG: más clara, misma performance
+    // Flecha SVG indicadora
     const arrow = document.createElement("div");
     arrow.id = "direction-arrow";
     arrow.style.cssText = `
@@ -130,11 +131,8 @@ btn.addEventListener("click", async () => {
     `;
     arrow.innerHTML = `
       <svg viewBox="0 0 100 100" width="60" height="60" xmlns="http://www.w3.org/2000/svg">
-        <!-- Halo/sombra suave sin filter costoso -->
         <circle cx="50" cy="50" r="46" fill="rgba(0,0,0,0.45)"/>
-        <!-- Anillo exterior -->
         <circle cx="50" cy="50" r="44" fill="none" stroke="#ffffff" stroke-width="3"/>
-        <!-- Flecha: punta -->
         <polygon points="50,12 72,50 60,50 60,88 40,88 40,50 28,50"
                  fill="#00ff00" stroke="#003300" stroke-width="2" stroke-linejoin="round"/>
       </svg>
@@ -148,15 +146,17 @@ btn.addEventListener("click", async () => {
     const worldQuat = new THREE.Quaternion();
     const forwardVec = new THREE.Vector3();
 
-    // ✅ Solo 10 FPS para la flecha (era 20). Suficiente para una brújula.
     setInterval(() => {
       if (!camera3D || lastUserLat === null) return;
 
+      // Rotación real de la cámara
       camera3D.getWorldQuaternion(worldQuat);
       forwardVec.set(0, 0, -1).applyQuaternion(worldQuat);
 
-      let camHeading = Math.atan2(forwardVec.x, forwardVec.z) * 180 / Math.PI;
-camHeading = (camHeading + 180 + 360) % 360;  // ✅ +180 de corrección
+      // ✅ FIX CLAVE: usar -forwardVec.z en vez de +forwardVec.z
+      //    Con esto: mirar al Norte → 0°, Este → 90°, Sur → 180°, Oeste → 270°
+      let camHeading = Math.atan2(forwardVec.x, -forwardVec.z) * 180 / Math.PI;
+      camHeading = (camHeading + 360) % 360;
 
       const targetBearing = getBearingToTarget(
         lastUserLat, lastUserLon, TARGET.lat, TARGET.lon
@@ -166,8 +166,7 @@ camHeading = (camHeading + 180 + 360) % 360;  // ✅ +180 de corrección
       while (delta > 180) delta -= 360;
       while (delta < -180) delta += 360;
 
-      // ✅ Solo actualizamos el DOM si el ángulo cambió más de 1°.
-      //    Evita repintar cuando el teléfono está quieto.
+      // Actualizar el DOM solo si cambia al menos 1°
       const roundedDelta = Math.round(delta);
       if (lastDeg === null || Math.abs(roundedDelta - lastDeg) >= 1) {
         lastDeg = roundedDelta;
@@ -175,7 +174,7 @@ camHeading = (camHeading + 180 + 360) % 360;  // ✅ +180 de corrección
           `translate3d(-50%, 0, 0) rotate(${delta}deg)`;
       }
 
-           // ✅ Cambia el color del polígono de la flecha
+      // Color: verde brillante si apuntas al LAB, verde pálido si no
       const arrowPath = arrow.querySelector("polygon");
       if (Math.abs(delta) < 15) {
         arrowPath.setAttribute("fill", "#00ff00");
@@ -186,7 +185,7 @@ camHeading = (camHeading + 180 + 360) % 360;  // ✅ +180 de corrección
       // Debug
       statusEl.textContent =
         `Flecha→ ${Math.round(targetBearing)}°  Cam→ ${Math.round(camHeading)}°  Δ ${roundedDelta}°`;
-    }, 100); // 10 FPS
+    }, 100);
 
     locar.setGpsOptions({
       enableHighAccuracy: false,
@@ -222,15 +221,17 @@ camHeading = (camHeading + 180 + 360) % 360;  // ✅ +180 de corrección
         `Distancia al Laboratorio: ${Math.round(dist)} m`;
 
       if (!objectsAdded) {
+        // Cubo magenta del Laboratorio
         const targetBox = makeBox(0xff00ff, 5);
         locar.add(targetBox, TARGET.lon, TARGET.lat, 2.5);
 
+        // Cubos de calibración: NORTE/SUR/ESTE/OESTE respecto a ti
         const offset = 0.0001;
         const refs = [
-          { dLat:  offset, dLon:  0,      color: 0xff0000 },
-          { dLat: -offset, dLon:  0,      color: 0xffff00 },
-          { dLat:  0,      dLon: -offset, color: 0x00ffff },
-          { dLat:  0,      dLon:  offset, color: 0x00ff00 }
+          { dLat:  offset, dLon:  0,      color: 0xff0000 }, // Norte
+          { dLat: -offset, dLon:  0,      color: 0xffff00 }, // Sur
+          { dLat:  0,      dLon: -offset, color: 0x00ffff }, // Oeste
+          { dLat:  0,      dLon:  offset, color: 0x00ff00 }  // Este
         ];
 
         for (const r of refs) {
