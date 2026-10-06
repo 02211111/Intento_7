@@ -281,13 +281,27 @@ btn.addEventListener("click", async () => {
       distanceEl.textContent =
         `Distancia al Laboratorio: ${Math.round(dist)} m`;
 
-      if (!objectsAdded) {
-        // Solo el cubo magenta del LAB en el mundo 3D
-        const targetBox = makeBox(0xff00ff, 5);
-        locar.add(targetBox, TARGET.lon, TARGET.lat, 2.5);
+            if (!objectsAdded) {
+        // ============================================
+        // CUBO 3D GEORREFERENCIADO DEL LABORATORIO
+        // ============================================
+        // Un cubo grande, elevado, para que sea bien visible en el mundo AR.
+        // Está anclado a las coordenadas reales del Laboratorio de Redes.
+        const targetBox = makeBox(0xff00ff, 8);   // cubo magenta de 8m
+        locar.add(targetBox, TARGET.lon, TARGET.lat, 4);  // 4m de altura
+
+        // ✅ Cubo extra: uno de referencia a 10 metros al frente (Norte)
+        //    para que veas claramente cómo se ancla un objeto 3D al mundo real.
+        const referenceBox = makeBox(0x00aaff, 5); // cubo azul de 5m
+        locar.add(
+          referenceBox,
+          lastUserLon,
+          lastUserLat + 0.0001,   // ~11 metros al norte
+          2.5
+        );
 
         objectsAdded = true;
-        setStatus("✅ GPS recibido. Gira el teléfono y observa el compás.");
+        setStatus("✅ GPS recibido. Busca el cubo magenta del LAB.");
         btn.style.display = "none";
       }
     });
