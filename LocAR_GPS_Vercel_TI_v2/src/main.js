@@ -325,27 +325,39 @@ btn.addEventListener("click", async () => {
       distanceEl.textContent =
         `Distancia al Laboratorio: ${Math.round(dist)} m`;
 
-            if (!objectsAdded) {
+                 if (!objectsAdded) {
         // ============================================
         // CUBO 3D GEORREFERENCIADO DEL LABORATORIO
         // ============================================
-        // Un cubo grande, elevado, para que sea bien visible en el mundo AR.
-        // Está anclado a las coordenadas reales del Laboratorio de Redes.
-        const targetBox = makeBox(0xff00ff, 8);   // cubo magenta de 8m
-        locar.add(targetBox, TARGET.lon, TARGET.lat, 4);  // 4m de altura
+        // ✅ LocAR espeja el eje E-O. Colocamos el cubo en la longitud
+        //    espejada respecto al usuario para que aparezca en la
+        //    dirección real correcta.
+        const userLon = c.longitude;
+        const userLat = c.latitude;
+        const mirroredLon = 2 * userLon - TARGET.lon;
 
-        // ✅ Cubo extra: uno de referencia a 10 metros al frente (Norte)
-        //    para que veas claramente cómo se ancla un objeto 3D al mundo real.
-        const referenceBox = makeBox(0x00aaff, 5); // cubo azul de 5m
+        const targetBox = makeBox(0xff00ff, 6);
+        targetBox.frustumCulled = false;
+        window.__targetBox = targetBox;
+        locar.add(targetBox, mirroredLon, TARGET.lat, 2);
+
+        // ============================================
+        // CUBO CERCANO DE REFERENCIA (~5 m al Norte real)
+        // ============================================
+        // Un cubo cercano para verificar la orientación al instante.
+        // Se coloca al norte real, que no está afectado por el espejado.
+        const nearBox = makeBox(0x00aaff, 3);
+        nearBox.frustumCulled = false;
+        window.__nearBox = nearBox;
         locar.add(
-          referenceBox,
-          lastUserLon,
-          lastUserLat + 0.0001,   // ~11 metros al norte
-          2.5
+          nearBox,
+          userLon,
+          userLat + 0.00005,
+          1.5
         );
 
         objectsAdded = true;
-        setStatus("✅ GPS recibido. Busca el cubo magenta del LAB.");
+        setStatus("✅ Cubos añadidos. El magenta debe estar en la dirección de la flecha.");
         btn.style.display = "none";
       }
     });
