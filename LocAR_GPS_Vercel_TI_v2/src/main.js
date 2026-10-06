@@ -8,7 +8,6 @@ const accuracyEl = document.getElementById("accuracy");
 const distanceEl = document.getElementById("distance");
 const canvas = document.getElementById("ar-canvas");
 
-// ✅ Coordenada actualizada del Laboratorio
 const TARGET = {
   lat: -2.291135,
   lon: -78.114209,
@@ -38,8 +37,6 @@ function makeBox(color, size = 10) {
   );
 }
 
-// Rumbo (bearing) desde el usuario hacia el objetivo
-// 0=Norte, 90=Este, 180=Sur, 270=Oeste
 function getBearingToTarget(userLat, userLon, targetLat, targetLon) {
   const toRad = d => d * Math.PI / 180;
   const toDeg = r => r * 180 / Math.PI;
@@ -76,9 +73,7 @@ btn.addEventListener("click", async () => {
     });
 
     app.on("webcamstarted", (ev) => {
-      if (ev && ev.texture) {
-        app.scene.background = ev.texture;
-      }
+      if (ev && ev.texture) app.scene.background = ev.texture;
     });
 
     app.on("webcamerror", (err) => {
@@ -114,34 +109,90 @@ btn.addEventListener("click", async () => {
       });
     }
 
-    // Flecha SVG indicadora
-    const arrow = document.createElement("div");
-    arrow.id = "direction-arrow";
-    arrow.style.cssText = `
+    // ============================================
+    // COMPÁS HUD: 4 cuadros alrededor de la flecha
+    // ============================================
+    const compassWrap = document.createElement("div");
+    compassWrap.style.cssText = `
       position: fixed;
       z-index: 15;
-      bottom: 90px;
+      bottom: 40px;
       left: 50%;
+      width: 220px;
+      height: 220px;
+      pointer-events: none;
+      transform: translate3d(-50%, 0, 0);
+    `;
+
+    // Cuadros cardinales alrededor del centro
+    const CARDINALS = [
+      { key: "N", label: "N", color: "#ff0000", angle: 0   },
+      { key: "E", label: "E", color: "#00ff00", angle: 90  },
+      { key: "S", label: "S", color: "#ffff00", angle: 180 },
+      { key: "W", label: "W", color: "#00ffff", angle: 270 }
+    ];
+    const RADIUS = 82;
+
+    CARDINALS.forEach(c => {
+      const box = document.createElement("div");
+      box.style.cssText = `
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 38px;
+        height: 38px;
+        margin-left: -19px;
+        margin-top: -19px;
+        background: ${c.color};
+        border: 2px solid #ffffff;
+        border-radius: 6px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        font-size: 18px;
+        color: #000000;
+        will-change: transform;
+        transform: translate(0px, -${RADIUS}px);
+        box-shadow: 0 0 8px rgba(0,0,0,0.8);
+      `;
+      box.textContent = c.label;
+      compassWrap.appendChild(box);
+      c.el = box;
+    });
+
+    // Flecha central (rotará para apuntar al LAB)
+    const arrow = document.createElement("div");
+    arrow.style.cssText = `
+      position: absolute;
+      left: 50%;
+      top: 50%;
       width: 60px;
       height: 60px;
+      margin-left: -30px;
+      margin-top: -30px;
       pointer-events: none;
       will-change: transform;
-      transform: translate3d(-50%, 0, 0) rotate(0deg);
+      transform: rotate(0deg);
       transform-origin: 50% 50%;
     `;
     arrow.innerHTML = `
       <svg viewBox="0 0 100 100" width="60" height="60" xmlns="http://www.w3.org/2000/svg">
-        <circle cx="50" cy="50" r="46" fill="rgba(0,0,0,0.45)"/>
+        <circle cx="50" cy="50" r="46" fill="rgba(0,0,0,0.5)"/>
         <circle cx="50" cy="50" r="44" fill="none" stroke="#ffffff" stroke-width="3"/>
-        <polygon points="50,12 72,50 60,50 60,88 40,88 40,50 28,50"
+        <polygon points="50,14 70,52 58,52 58,86 42,86 42,52 30,52"
                  fill="#00ff00" stroke="#003300" stroke-width="2" stroke-linejoin="round"/>
       </svg>
     `;
-    document.body.appendChild(arrow);
+    compassWrap.appendChild(arrow);
 
+    document.body.appendChild(compassWrap);
+
+    // Estado
     let lastUserLat = null;
     let lastUserLon = null;
     let lastDeg = null;
+    let lastHeading = null;
 
     const worldQuat = new THREE.Quaternion();
     const forwardVec = new THREE.Vector3();
@@ -149,15 +200,13 @@ btn.addEventListener("click", async () => {
     setInterval(() => {
       if (!camera3D || lastUserLat === null) return;
 
-      // Rotación real de la cámara
+      // Heading de la cámara
       camera3D.getWorldQuaternion(worldQuat);
       forwardVec.set(0, 0, -1).applyQuaternion(worldQuat);
-
-      // ✅ FIX CLAVE: usar -forwardVec.z en vez de +forwardVec.z
-      //    Con esto: mirar al Norte → 0°, Este → 90°, Sur → 180°, Oeste → 270°
       let camHeading = Math.atan2(forwardVec.x, -forwardVec.z) * 180 / Math.PI;
       camHeading = (camHeading + 360) % 360;
 
+      // Rumbo al LAB
       const targetBearing = getBearingToTarget(
         lastUserLat, lastUserLon, TARGET.lat, TARGET.lon
       );
@@ -166,15 +215,27 @@ btn.addEventListener("click", async () => {
       while (delta > 180) delta -= 360;
       while (delta < -180) delta += 360;
 
-      // Actualizar el DOM solo si cambia al menos 1°
+      // Rotar los cuadros alrededor del centro (rotación inversa al heading)
+      // Solo si el heading cambió ≥ 0.5° para ahorrar repintados
+      if (lastHeading === null || Math.abs(camHeading - lastHeading) >= 0.5) {
+        lastHeading = camHeading;
+        CARDINALS.forEach(c => {
+          const screenAngle = c.angle - camHeading;
+          const rad = (screenAngle - 90) * Math.PI / 180;
+          const x = Math.cos(rad) * RADIUS;
+          const y = Math.sin(rad) * RADIUS;
+          c.el.style.transform = `translate(${x}px, ${y}px)`;
+        });
+      }
+
+      // Rotar la flecha hacia el LAB
       const roundedDelta = Math.round(delta);
       if (lastDeg === null || Math.abs(roundedDelta - lastDeg) >= 1) {
         lastDeg = roundedDelta;
-        arrow.style.transform =
-          `translate3d(-50%, 0, 0) rotate(${delta}deg)`;
+        arrow.style.transform = `rotate(${delta}deg)`;
       }
 
-      // Color: verde brillante si apuntas al LAB, verde pálido si no
+      // Color de la flecha
       const arrowPath = arrow.querySelector("polygon");
       if (Math.abs(delta) < 15) {
         arrowPath.setAttribute("fill", "#00ff00");
@@ -184,7 +245,7 @@ btn.addEventListener("click", async () => {
 
       // Debug
       statusEl.textContent =
-        `Flecha→ ${Math.round(targetBearing)}°  Cam→ ${Math.round(camHeading)}°  Δ ${roundedDelta}°`;
+        `LAB→ ${Math.round(targetBearing)}°  Cam→ ${Math.round(camHeading)}°  Δ ${roundedDelta}°`;
     }, 100);
 
     locar.setGpsOptions({
@@ -221,26 +282,12 @@ btn.addEventListener("click", async () => {
         `Distancia al Laboratorio: ${Math.round(dist)} m`;
 
       if (!objectsAdded) {
-        // Cubo magenta del Laboratorio
+        // Solo el cubo magenta del LAB en el mundo 3D
         const targetBox = makeBox(0xff00ff, 5);
         locar.add(targetBox, TARGET.lon, TARGET.lat, 2.5);
 
-        // Cubos de calibración: NORTE/SUR/ESTE/OESTE respecto a ti
-        const offset = 0.0001;
-        const refs = [
-          { dLat:  offset, dLon:  0,      color: 0xff0000 }, // Norte
-          { dLat: -offset, dLon:  0,      color: 0xffff00 }, // Sur
-          { dLat:  0,      dLon: -offset, color: 0x00ffff }, // Oeste
-          { dLat:  0,      dLon:  offset, color: 0x00ff00 }  // Este
-        ];
-
-        for (const r of refs) {
-          const box = makeBox(r.color, 3);
-          locar.add(box, c.longitude + r.dLon, c.latitude + r.dLat, 1.5);
-        }
-
         objectsAdded = true;
-        setStatus("✅ GPS inicial recibido. Sigue la flecha verde.");
+        setStatus("✅ GPS recibido. Gira el teléfono y observa el compás.");
         btn.style.display = "none";
       }
     });
