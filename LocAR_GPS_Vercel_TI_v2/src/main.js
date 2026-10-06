@@ -291,7 +291,7 @@ btn.addEventListener("click", async () => {
       timeout: 30000
     });
 
-    let objectsAdded = false;
+       let objectsAdded = false;
 
     locar.on("gpserror", (err) => {
       const code = err?.code ?? "";
@@ -304,12 +304,17 @@ btn.addEventListener("click", async () => {
     // ============================================================
     // 7) EN CADA ACTUALIZACIÓN DE GPS
     // ============================================================
+    // Promediamos las primeras N lecturas para tener una posición estable.
+    const GPS_SAMPLES = 3;
+    const gpsBuffer = [];
+
     locar.on("gpsupdate", (ev) => {
       const c = ev.position.coords;
 
       lastUserLat = c.latitude;
       lastUserLon = c.longitude;
 
+      // Actualizar UI en cada lectura
       coordsEl.textContent =
         `GPS: ${c.latitude.toFixed(7)}, ${c.longitude.toFixed(7)}`;
       accuracyEl.textContent =
@@ -321,50 +326,40 @@ btn.addEventListener("click", async () => {
       distanceEl.textContent =
         `Distancia al Laboratorio: ${Math.round(dist)} m`;
 
-      if (!objectsAdded) {
-        // ---- Primera vez: crear los cubos con espejado E-O ----
-        const mirroredLon = 2 * c.longitude - TARGET.lon;
+      // Si ya colocamos los cubos, no hacemos nada más
+      if (objectsAdded) return;
 
-        // Cubo magenta del LAB
-        const targetBox = makeBox(0xff00ff, 6);
-        targetBox.frustumCulled = false;
-        window.__targetBox = targetBox;
-        locar.add(targetBox, mirroredLon, TARGET.lat, 2);
+      // Acumular lecturas
+      gpsBuffer.push({ lat: c.latitude, lon: c.longitude });
 
-        // Cubo azul de referencia cercano (~5 m al norte)
-        const nearBox = makeBox(0x00aaff, 3);
-        nearBox.frustumCulled = false;
-        window.__nearBox = nearBox;
-        locar.add(nearBox, c.longitude, c.latitude + 0.00005, 1.5);
-
-        // Guardar la posición con la que se calculó
-        window.__lastUserLon = c.longitude;
-        window.__lastUserLat = c.latitude;
-
-        objectsAdded = true;
-        setStatus("✅ Cubos añadidos. Esperando a que el GPS se estabilice…");
-        btn.style.display = "none";
-
-      } else {
-        // ---- Actualizaciones posteriores: re-anclar si el GPS se movió ----
-        // Umbral 0.00003° ≈ 3.3 m
-        if (window.__targetBox && Math.abs(c.longitude - window.__lastUserLon) > 0.00003) {
-          const newMirroredLon = 2 * c.longitude - TARGET.lon;
-
-          locar.remove(window.__targetBox);
-          locar.add(window.__targetBox, newMirroredLon, TARGET.lat, 2);
-
-          if (window.__nearBox) {
-            locar.remove(window.__nearBox);
-            locar.add(window.__nearBox, c.longitude, c.latitude + 0.00005, 1.5);
-          }
-
-          window.__lastUserLon = c.longitude;
-          window.__lastUserLat = c.latitude;
-
-          console.log("[FIX] Cubo re-anclado con nueva posición GPS");
-        }
+      // Mostrar progreso en el estado
+      if (gpsBuffer.length < GPS_SAMPLES) {
+        setStatus(`Estabilizando GPS… (${gpsBuffer.length}/${GPS_SAMPLES})`);
+        return;
       }
+
+      // Promediar las N lecturas para una posición más estable
+      const avgLat = gpsBuffer.reduce((s, p) => s + p.lat, 0) / gpsBuffer.length;
+      const avgLon = gpsBuffer.reduce((s, p) => s + p.lon, 0) / gpsBuffer.length;
+
+      // Espejado E-O usando la posición promediada
+      const mirroredLon = 2 * avgLon - TARGET.lon;
+
+      // Cubo magenta del LAB (con espejado E-O)
+      const targetBox = makeBox(0xff00ff, 6);
+      targetBox.frustumCulled = false;
+      window.__targetBox = targetBox;
+      locar.add(targetBox, mirroredLon, TARGET.lat, 2);
+
+      // Cubo azul de referencia cercano (~5 m al norte de la posición promediada)
+      const nearBox = makeBox(0x00aaff, 3);
+      nearBox.frustumCulled = false;
+      window.__nearBox = nearBox;
+      locar.add(nearBox, avgLon, avgLat + 0.00005, 1.5);
+
+      objectsAdded = true;
+      setStatus("✅ Cubos colocados. Sigue la flecha verde.");
+      btn.style.display = "none";
     });
 
     setStatus("Cámara iniciada. Solicitando ubicación GPS...");
