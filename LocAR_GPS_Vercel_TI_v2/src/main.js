@@ -303,7 +303,6 @@ btn.addEventListener("click", async () => {
     // ============================================================
     // 7) EN CADA ACTUALIZACIÓN DE GPS
     // ============================================================
-    // Promediamos las primeras N lecturas para tener una posición estable.
     const GPS_SAMPLES = 3;
     const gpsBuffer = [];
 
@@ -325,56 +324,29 @@ btn.addEventListener("click", async () => {
       distanceEl.textContent =
         `Distancia al Laboratorio: ${Math.round(dist)} m`;
 
-      // Si ya colocamos los cubos, no hacemos nada más
       if (objectsAdded) return;
 
-      // Acumular lecturas
       gpsBuffer.push({ lat: c.latitude, lon: c.longitude });
 
-      // Mostrar progreso en el estado
       if (gpsBuffer.length < GPS_SAMPLES) {
         setStatus(`Estabilizando GPS… (${gpsBuffer.length}/${GPS_SAMPLES})`);
         return;
       }
 
-      // Promediar las N lecturas para una posición más estable
       const avgLat = gpsBuffer.reduce((s, p) => s + p.lat, 0) / gpsBuffer.length;
       const avgLon = gpsBuffer.reduce((s, p) => s + p.lon, 0) / gpsBuffer.length;
 
       // Espejado E-O usando la posición promediada
       const mirroredLon = 2 * avgLon - TARGET.lon;
 
-      // ---- Cubo magenta del LAB (con espejado E-O) ----
+      // ---- ÚNICO CUBO: magenta del LAB ----
       const targetBox = makeBox(0xff00ff, 6);
       targetBox.frustumCulled = false;
       window.__targetBox = targetBox;
       locar.add(targetBox, mirroredLon, TARGET.lat, 2);
 
-      // ---- Cubo azul cercano (~5 m al norte real) ----
-      const nearBox = makeBox(0x00aaff, 3);
-      nearBox.frustumCulled = false;
-      window.__nearBox = nearBox;
-      locar.add(nearBox, avgLon, avgLat + 0.00005, 1.5);
-
-      // ---- Cubo naranja OPUESTO al LAB (~15 m detrás de ti) ----
-      // Vector unitario usuario→LAB, invertido y escalado a ~15 m
-      const dLat = TARGET.lat - avgLat;
-      const dLon = TARGET.lon - avgLon;
-      const len = Math.sqrt(dLat * dLat + dLon * dLon) || 1;
-      const scale = 0.00013 / len; // ~15 m
-
-      const oppositeLatPhysical = avgLat - dLat * scale;
-      const oppositeLonPhysical = avgLon - dLon * scale;
-      // Pre-espejamos la longitud porque LocAR espeja E-O internamente
-      const oppositeLon = 2 * avgLon - oppositeLonPhysical;
-
-      const oppositeBox = makeBox(0xff8800, 3);
-      oppositeBox.frustumCulled = false;
-      window.__oppositeBox = oppositeBox;
-      locar.add(oppositeBox, oppositeLon, oppositeLatPhysical, 1.5);
-
       objectsAdded = true;
-      setStatus("✅ Cubos colocados. Sigue la flecha verde.");
+      setStatus("✅ Cubo colocado. Apunta al Norte para verlo.");
       btn.style.display = "none";
     });
 
