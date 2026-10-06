@@ -37,8 +37,8 @@ function makeBox(color, size = 10) {
   );
 }
 
-// ✅ NUEVO: Rumbo (bearing) desde el usuario hacia el objetivo
-//    0 = Norte, 90 = Este, 180 = Sur, 270 = Oeste
+// ✅ NUEVO: Rumbo desde el usuario hacia el objetivo
+//    0=Norte, 90=Este, 180=Sur, 270=Oeste
 function getBearingToTarget(userLat, userLon, targetLat, targetLon) {
   const toRad = d => d * Math.PI / 180;
   const toDeg = r => r * 180 / Math.PI;
@@ -106,7 +106,7 @@ btn.addEventListener("click", async () => {
       console.log("Pixel ratio ajustado a 1.");
     }
 
-    // ✅ NUEVO: Buscar la cámara 3D de Three.js (para leer hacia dónde miras)
+    // ✅ NUEVO: Buscar la cámara 3D de Three.js (para la flecha)
     let camera3D = null;
     if (app.scene && app.scene.camera) camera3D = app.scene.camera;
     else if (app.camera) camera3D = app.camera;
@@ -115,72 +115,68 @@ btn.addEventListener("click", async () => {
         if (obj.isCamera && !camera3D) camera3D = obj;
       });
     }
-    console.log("Cámara 3D encontrada:", !!camera3D);
 
-    // ✅ NUEVO: Crear el punto indicador (elemento HTML, cero costo GPU)
-    const dot = document.createElement("div");
-    dot.id = "direction-dot";
-    dot.style.cssText = `
+    // ✅ NUEVO: Crear la flecha indicadora (elemento HTML, cero costo GPU)
+    const arrow = document.createElement("div");
+    arrow.id = "direction-arrow";
+    arrow.style.cssText = `
       position: fixed;
       z-index: 15;
-      bottom: 80px;
+      bottom: 90px;
       left: 50%;
-      width: 22px;
-      height: 22px;
-      border-radius: 50%;
-      background: #000;
-      border: 3px solid #fff;
-      transform: translateX(-50%);
+      width: 0;
+      height: 0;
+      border-left: 14px solid transparent;
+      border-right: 14px solid transparent;
+      border-bottom: 26px solid #00ff00;
+      transform: translateX(-50%) rotate(0deg);
+      transform-origin: 50% 60%;
       pointer-events: none;
-      box-shadow: 0 0 12px rgba(0,0,0,0.7);
-      transition: left 0.15s linear, background 0.2s;
+      filter: drop-shadow(0 0 4px rgba(0,0,0,0.9));
+      transition: transform 0.1s linear;
     `;
-    document.body.appendChild(dot);
+    document.body.appendChild(arrow);
 
-    // ✅ NUEVO: Guardar la última posición GPS del usuario
+    // ✅ NUEVO: Guardar la última posición GPS
     let lastUserLat = null;
     let lastUserLon = null;
 
-    // ✅ NUEVO: Actualizar el punto 5 veces por segundo (nada de carga)
+    // ✅ NUEVO: Actualizar la flecha 10 veces por segundo (liviano)
     setInterval(() => {
       if (!camera3D || lastUserLat === null) return;
 
-      // 1) Dirección en la que mira la cámara (en grados, 0=Norte, 90=Este)
+      // 1) Dirección en la que mira la cámara
       const forward = new THREE.Vector3();
       camera3D.getWorldDirection(forward);
       let camHeading = Math.atan2(forward.x, forward.z) * 180 / Math.PI;
       camHeading = (camHeading + 360) % 360;
-      // En Three.js mirar hacia -Z da heading 180; sumamos 180 para que Norte = 0
-      camHeading = (camHeading + 180) % 360;
 
       // 2) Rumbo hacia el laboratorio
       const targetBearing = getBearingToTarget(
         lastUserLat, lastUserLon, TARGET.lat, TARGET.lon
       );
 
-      // 3) Diferencia (cuánto hay que girar)
-      //    0 = el objetivo está al frente
-      //    +90 = hay que girar a la derecha
-      //    -90 = hay que girar a la izquierda
-      //    ±180 = el objetivo está detrás
+      // 3) Diferencia angular (-180 a +180)
+      //    Positivo → hay que girar a la derecha
+      //    Negativo → hay que girar a la izquierda
       let delta = targetBearing - camHeading;
       while (delta > 180) delta -= 360;
       while (delta < -180) delta += 360;
 
-      // 4) Colocar el punto en pantalla
-      //    Cuando delta=0 el punto va al centro (50%)
-      //    Cuando delta=±90 el punto va al 10% o al 90%
-      const angleRad = delta * Math.PI / 180;
-      const xPercent = 50 + Math.sin(angleRad) * 40;
-      dot.style.left = xPercent + "%";
+      // 4) Rotar la flecha
+      //    rotate(0deg) = flecha apuntando hacia arriba (objetivo al frente)
+      //    rotate(90deg) = flecha apuntando a la derecha
+      //    rotate(-90deg) = flecha apuntando a la izquierda
+      arrow.style.transform =
+        `translateX(-50%) rotate(${delta}deg)`;
 
-      // 5) Color: verde si ya estás mirando hacia el objetivo, negro si no
+      // 5) Color: verde brillante si ya apuntas al objetivo, verde tenue si no
       if (Math.abs(delta) < 15) {
-        dot.style.background = "#00ff00";
+        arrow.style.borderBottomColor = "#00ff00";
       } else {
-        dot.style.background = "#000";
+        arrow.style.borderBottomColor = "#00aa44";
       }
-    }, 200); // 5 Hz
+    }, 100);
 
     locar.setGpsOptions({
       enableHighAccuracy: false,
@@ -201,7 +197,7 @@ btn.addEventListener("click", async () => {
     locar.on("gpsupdate", (ev) => {
       const c = ev.position.coords;
 
-      // ✅ NUEVO: guardar la posición para el punto indicador
+      // ✅ NUEVO: guardar la posición para la flecha
       lastUserLat = c.latitude;
       lastUserLon = c.longitude;
 
@@ -217,8 +213,9 @@ btn.addEventListener("click", async () => {
         `Distancia al Laboratorio: ${Math.round(dist)} m`;
 
       if (!objectsAdded) {
-        const targetBox = makeBox(0xff00ff, 4);
-        locar.add(targetBox, TARGET.lon, TARGET.lat, 2);
+        // ✅ Cubos más pequeños: laboratorio 5×5×5 (antes 12)
+        const targetBox = makeBox(0xff00ff, 5);
+        locar.add(targetBox, TARGET.lon, TARGET.lat, 2.5);
 
         const offset = 0.0001;
 
@@ -229,13 +226,14 @@ btn.addEventListener("click", async () => {
           { dLat:  0,      dLon:  offset, color: 0x00ff00 }
         ];
 
+        // ✅ Cubos más pequeños: calibración 3×3×3 (antes 10)
         for (const r of refs) {
-        const box = makeBox(r.color, 3);
-        locar.add(box, c.longitude + r.dLon, c.latitude + r.dLat, 1.5);
-      }
+          const box = makeBox(r.color, 3);
+          locar.add(box, c.longitude + r.dLon, c.latitude + r.dLat, 1.5);
+        }
 
         objectsAdded = true;
-        setStatus("✅ GPS inicial recibido. El punto indica dónde está el Laboratorio.");
+        setStatus("✅ GPS inicial recibido. Sigue la flecha verde hacia el Laboratorio.");
         btn.style.display = "none";
       }
     });
