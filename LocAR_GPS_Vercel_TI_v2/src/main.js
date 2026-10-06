@@ -200,23 +200,15 @@ btn.addEventListener("click", async () => {
     setInterval(() => {
       if (!camera3D || lastUserLat === null) return;
 
-      // Heading de la cámara
+      // ============================================================
+      // 1) HEADING DE LA CÁMARA (para rotar los cuadros N/S/E/O)
+      // ============================================================
       camera3D.getWorldQuaternion(worldQuat);
       forwardVec.set(0, 0, -1).applyQuaternion(worldQuat);
       let camHeading = Math.atan2(forwardVec.x, -forwardVec.z) * 180 / Math.PI;
       camHeading = (camHeading + 360) % 360;
 
-      // Rumbo al LAB
-      const targetBearing = getBearingToTarget(
-        lastUserLat, lastUserLon, TARGET.lat, TARGET.lon
-      );
-
-      let delta = targetBearing - camHeading;
-      while (delta > 180) delta -= 360;
-      while (delta < -180) delta += 360;
-
-      // Rotar los cuadros alrededor del centro (rotación inversa al heading)
-      // Solo si el heading cambió ≥ 0.5° para ahorrar repintados
+      // Rotar los cuadros alrededor del centro
       if (lastHeading === null || Math.abs(camHeading - lastHeading) >= 0.5) {
         lastHeading = camHeading;
         CARDINALS.forEach(c => {
@@ -228,7 +220,59 @@ btn.addEventListener("click", async () => {
         });
       }
 
-      // Rotar la flecha hacia el LAB
+      // ============================================================
+      // 2) ÁNGULO DE LA FLECHA USANDO LA POSICIÓN REAL DEL CUBO EN 3D
+      // ============================================================
+      // Esto garantiza que la flecha y el cubo SIEMPRE coincidan,
+      // sin importar qué convención use LocAR internamente.
+      let delta = 0;
+
+      if (window.__targetBox && window.__targetBox.parent) {
+        const targetWorld = new THREE.Vector3();
+        window.__targetBox.getWorldPosition(targetWorld);
+
+        const camPos = new THREE.Vector3();
+        camera3D.getWorldPosition(camPos);
+
+        // Vector horizontal desde la cámara hacia el cubo
+        const toTarget = targetWorld.clone().sub(camPos);
+        toTarget.y = 0;
+
+        // Vector forward de la cámara (horizontal)
+        const camFwd = new THREE.Vector3();
+        camera3D.getWorldDirection(camFwd);
+        camFwd.y = 0;
+
+        if (toTarget.lengthSq() > 0.0001 && camFwd.lengthSq() > 0.0001) {
+          toTarget.normalize();
+          camFwd.normalize();
+
+          // Ángulo firmado entre camFwd y toTarget en el plano horizontal.
+          // 0°   = el cubo está al frente
+          // +90° = el cubo está a la derecha
+          // -90° = el cubo está a la izquierda
+          // 180° = el cubo está detrás
+          const cross = camFwd.x * toTarget.z - camFwd.z * toTarget.x;
+          const dot   = camFwd.x * toTarget.x + camFwd.z * toTarget.z;
+          delta = Math.atan2(cross, dot) * 180 / Math.PI;
+
+          // En el HUD, rotación positiva = flecha apunta a la derecha.
+          // Según la convención de arriba, un cross positivo significa que el
+          // objetivo está a la izquierda (por el eje Y invertido en pantalla).
+          // Probamos: si al apuntar al cubo el delta es +90, invertimos el signo.
+          delta = -delta;
+        }
+      } else {
+        // Fallback por si el cubo no está disponible todavía
+        const targetBearing = getBearingToTarget(
+          lastUserLat, lastUserLon, TARGET.lat, TARGET.lon
+        );
+        delta = targetBearing - camHeading;
+        while (delta > 180) delta -= 360;
+        while (delta < -180) delta += 360;
+      }
+
+      // Rotar la flecha solo si el ángulo cambió ≥ 1°
       const roundedDelta = Math.round(delta);
       if (lastDeg === null || Math.abs(roundedDelta - lastDeg) >= 1) {
         lastDeg = roundedDelta;
@@ -245,7 +289,7 @@ btn.addEventListener("click", async () => {
 
       // Debug
       statusEl.textContent =
-        `LAB→ ${Math.round(targetBearing)}°  Cam→ ${Math.round(camHeading)}°  Δ ${roundedDelta}°`;
+        `Cam→ ${Math.round(camHeading)}°  Δ Flecha ${roundedDelta}°`;
     }, 100);
 
     locar.setGpsOptions({
