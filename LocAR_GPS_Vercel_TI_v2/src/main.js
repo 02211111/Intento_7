@@ -37,8 +37,6 @@ function makeBox(color, size = 10) {
   );
 }
 
-// Rumbo (bearing) desde el usuario hacia el objetivo
-// 0=Norte, 90=Este, 180=Sur, 270=Oeste
 function getBearingToTarget(userLat, userLon, targetLat, targetLon) {
   const toRad = d => d * Math.PI / 180;
   const toDeg = r => r * 180 / Math.PI;
@@ -75,7 +73,6 @@ btn.addEventListener("click", async () => {
     });
 
     app.on("webcamstarted", (ev) => {
-      console.log("Cámara iniciada (evento).");
       if (ev && ev.texture) {
         app.scene.background = ev.texture;
       }
@@ -95,7 +92,6 @@ btn.addEventListener("click", async () => {
         videoTexture.magFilter = THREE.LinearFilter;
         videoTexture.generateMipmaps = false;
         app.scene.background = videoTexture;
-        console.log("Fondo de video asignado manualmente.");
       } catch (err) {
         console.warn("No se pudo asignar el fondo de video:", err);
       }
@@ -103,10 +99,9 @@ btn.addEventListener("click", async () => {
 
     if (app.renderer) {
       app.renderer.setPixelRatio(1);
-      console.log("Pixel ratio ajustado a 1.");
     }
 
-    // Buscar la cámara 3D de Three.js
+    // Buscar la cámara 3D
     let camera3D = null;
     if (app.scene && app.scene.camera) camera3D = app.scene.camera;
     else if (app.camera) camera3D = app.camera;
@@ -115,9 +110,9 @@ btn.addEventListener("click", async () => {
         if (obj.isCamera && !camera3D) camera3D = obj;
       });
     }
-    console.log("Cámara 3D encontrada:", !!camera3D);
 
-    // Crear la flecha indicadora (elemento HTML, cero costo GPU)
+    // ✅ Flecha OPTIMIZADA: sin drop-shadow, sin transition,
+    //    con will-change y translate3d para forzar aceleración por GPU.
     const arrow = document.createElement("div");
     arrow.id = "direction-arrow";
     arrow.style.cssText = `
@@ -130,60 +125,57 @@ btn.addEventListener("click", async () => {
       border-left: 18px solid transparent;
       border-right: 18px solid transparent;
       border-bottom: 32px solid #00ff00;
-      transform: translateX(-50%) rotate(0deg);
-      transform-origin: 50% 60%;
       pointer-events: none;
-      filter: drop-shadow(0 0 4px rgba(0,0,0,0.9));
-      transition: transform 0.1s linear;
+      will-change: transform;
+      transform: translate3d(-50%, 0, 0) rotate(0deg);
+      transform-origin: 50% 60%;
     `;
     document.body.appendChild(arrow);
 
-    // Guardar la última posición GPS
     let lastUserLat = null;
     let lastUserLon = null;
+    let lastDeg = null;
 
-    // Bucle de actualización de la flecha: 20 veces por segundo
     const worldQuat = new THREE.Quaternion();
     const forwardVec = new THREE.Vector3();
 
+    // ✅ Solo 10 FPS para la flecha (era 20). Suficiente para una brújula.
     setInterval(() => {
       if (!camera3D || lastUserLat === null) return;
 
-      // 1) Obtener la rotación real de la cámara en coordenadas de mundo
       camera3D.getWorldQuaternion(worldQuat);
-
-      // 2) Vector "hacia adelante" (-Z en espacio local de la cámara)
       forwardVec.set(0, 0, -1).applyQuaternion(worldQuat);
 
-      // 3) Heading de la cámara (0=Norte, 90=Este, 180=Sur, 270=Oeste)
       let camHeading = Math.atan2(forwardVec.x, forwardVec.z) * 180 / Math.PI;
       camHeading = (camHeading + 360) % 360;
 
-      // 4) Rumbo hacia el laboratorio
       const targetBearing = getBearingToTarget(
         lastUserLat, lastUserLon, TARGET.lat, TARGET.lon
       );
 
-      // 5) Diferencia angular (-180 a +180)
       let delta = targetBearing - camHeading;
       while (delta > 180) delta -= 360;
       while (delta < -180) delta += 360;
 
-      // 6) Rotar la flecha (delta=0 → flecha apuntando arriba)
-      arrow.style.transform =
-        `translateX(-50%) rotate(${delta}deg)`;
+      // ✅ Solo actualizamos el DOM si el ángulo cambió más de 1°.
+      //    Evita repintar cuando el teléfono está quieto.
+      const roundedDelta = Math.round(delta);
+      if (lastDeg === null || Math.abs(roundedDelta - lastDeg) >= 1) {
+        lastDeg = roundedDelta;
+        arrow.style.transform =
+          `translate3d(-50%, 0, 0) rotate(${delta}deg)`;
+      }
 
-      // 7) Color: verde brillante si ya apuntas al objetivo
       if (Math.abs(delta) < 15) {
         arrow.style.borderBottomColor = "#00ff00";
       } else {
         arrow.style.borderBottomColor = "#00aa44";
       }
 
-      // 8) Debug en el panel de estado
+      // Debug
       statusEl.textContent =
-        `Flecha→ ${Math.round(targetBearing)}°  Cam→ ${Math.round(camHeading)}°  Δ ${Math.round(delta)}°`;
-    }, 50);
+        `Flecha→ ${Math.round(targetBearing)}°  Cam→ ${Math.round(camHeading)}°  Δ ${roundedDelta}°`;
+    }, 100); // 10 FPS
 
     locar.setGpsOptions({
       enableHighAccuracy: false,
@@ -204,7 +196,6 @@ btn.addEventListener("click", async () => {
     locar.on("gpsupdate", (ev) => {
       const c = ev.position.coords;
 
-      // Guardar posición para la flecha
       lastUserLat = c.latitude;
       lastUserLon = c.longitude;
 
@@ -220,12 +211,10 @@ btn.addEventListener("click", async () => {
         `Distancia al Laboratorio: ${Math.round(dist)} m`;
 
       if (!objectsAdded) {
-        // Cubo magenta del laboratorio: 5×5×5 (antes 12)
         const targetBox = makeBox(0xff00ff, 5);
         locar.add(targetBox, TARGET.lon, TARGET.lat, 2.5);
 
         const offset = 0.0001;
-
         const refs = [
           { dLat:  offset, dLon:  0,      color: 0xff0000 },
           { dLat: -offset, dLon:  0,      color: 0xffff00 },
@@ -233,7 +222,6 @@ btn.addEventListener("click", async () => {
           { dLat:  0,      dLon:  offset, color: 0x00ff00 }
         ];
 
-        // Cubos de calibración: 3×3×3 (antes 10)
         for (const r of refs) {
           const box = makeBox(r.color, 3);
           locar.add(box, c.longitude + r.dLon, c.latitude + r.dLat, 1.5);
