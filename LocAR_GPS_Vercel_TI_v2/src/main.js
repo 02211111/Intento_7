@@ -217,8 +217,8 @@ btn.addEventListener("click", async () => {
         `Distancia al Laboratorio: ${Math.round(dist)} m`;
 
       if (!objectsAdded) {
-        const targetBox = makeBox(0xff00ff, 12);
-        locar.add(targetBox, TARGET.lon, TARGET.lat, 6);
+        const targetBox = makeBox(0xff00ff, 4);
+        locar.add(targetBox, TARGET.lon, TARGET.lat, 2);
 
         const offset = 0.0001;
 
@@ -230,9 +230,9 @@ btn.addEventListener("click", async () => {
         ];
 
         for (const r of refs) {
-          const box = makeBox(r.color, 10);
-          locar.add(box, c.longitude + r.dLon, c.latitude + r.dLat, 5);
-        }
+        const box = makeBox(r.color, 3);
+        locar.add(box, c.longitude + r.dLon, c.latitude + r.dLat, 1.5);
+      }
 
         objectsAdded = true;
         setStatus("✅ GPS inicial recibido. El punto indica dónde está el Laboratorio.");
