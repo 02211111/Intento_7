@@ -151,8 +151,7 @@ btn.addEventListener("click", async () => {
       let camHeading = Math.atan2(forward.x, forward.z) * 180 / Math.PI;
       camHeading = (camHeading + 360) % 360;
       // En Three.js mirar hacia -Z da heading 180; sumamos 180 para que Norte = 0
-      // camHeading = (camHeading + 180) % 360;  // ← antes
-      camHeading = camHeading;                    // ← ahora (sin el +180)
+      camHeading = (camHeading + 180) % 360;
 
       // 2) Rumbo hacia el laboratorio
       const targetBearing = getBearingToTarget(
