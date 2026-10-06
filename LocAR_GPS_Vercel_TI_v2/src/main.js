@@ -351,6 +351,17 @@ btn.addEventListener("click", async () => {
       window.__targetBox = targetBox;
       locar.add(targetBox, mirroredLon, TARGET.lat, 2);
 
+      // ✅ Cubo opuesto: en la dirección contraria al LAB
+      //    Espejo de la posición del LAB respecto a ti (misma distancia,
+      //    dirección opuesta en latitud y longitud).
+      const oppositeLon = 2 * avgLon - mirroredLon; // = TARGET.lon (el original)
+      const oppositeLat = 2 * avgLat - TARGET.lat;
+
+      const oppositeBox = makeBox(0xff8800, 6); // naranja, para diferenciarlo
+      oppositeBox.frustumCulled = false;
+      window.__oppositeBox = oppositeBox;
+      locar.add(oppositeBox, oppositeLon, oppositeLat, 2);
+
       // Cubo azul de referencia cercano (~5 m al norte de la posición promediada)
       const nearBox = makeBox(0x00aaff, 3);
       nearBox.frustumCulled = false;
