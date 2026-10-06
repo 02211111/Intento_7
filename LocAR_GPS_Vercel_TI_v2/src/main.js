@@ -30,32 +30,39 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
+// ⚡ Canvas de etiqueta MÁS PEQUEÑO (256x128 en vez de 512x256)
+//    Eso reduce a la mitad el ancho/alto de la textura → 4× menos píxeles → GPU respira.
 function makeTextSprite(text, textColor = "#ffffff", borderColor = "#ffffff", scaleX = 8, scaleY = 4) {
   const c = document.createElement("canvas");
-  c.width = 512;
-  c.height = 256;
+  c.width = 256;   // ⚡ antes 512
+  c.height = 128;  // ⚡ antes 256
   const ctx = c.getContext("2d");
 
   ctx.fillStyle = "rgba(0,0,0,0.85)";
   ctx.fillRect(0, 0, c.width, c.height);
 
   ctx.strokeStyle = borderColor;
-  ctx.lineWidth = 12;
-  ctx.strokeRect(6, 6, c.width - 12, c.height - 12);
+  ctx.lineWidth = 6;
+  ctx.strokeRect(3, 3, c.width - 6, c.height - 6);
 
   ctx.fillStyle = textColor;
-  ctx.font = "bold 110px Arial";
+  ctx.font = "bold 55px Arial"; // ⚡ proporcional al nuevo tamaño
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   ctx.fillText(text, c.width / 2, c.height / 2);
 
   const texture = new THREE.CanvasTexture(c);
   texture.needsUpdate = true;
+  // ⚡ Sin mipmaps ni filtros caros:
+  texture.generateMipmaps = false;
+  texture.minFilter = THREE.LinearFilter;
+  texture.magFilter = THREE.LinearFilter;
 
   const material = new THREE.SpriteMaterial({
     map: texture,
     transparent: true,
-    depthTest: false
+    depthTest: false,
+    depthWrite: false
   });
 
   const sprite = new THREE.Sprite(material);
@@ -63,49 +70,47 @@ function makeTextSprite(text, textColor = "#ffffff", borderColor = "#ffffff", sc
   return sprite;
 }
 
-// ✅ PERF: BoxGeometry reutilizable (comparte geometría entre cubos)
+// ⚡ Geometrías compartidas (una sola en memoria para todos los cubos)
 const SHARED_BOX_GEO = new THREE.BoxGeometry(1, 1, 1);
 
 function makeCubeWithLabel(color, label, labelColor, size = 10) {
   const group = new THREE.Group();
 
-  // ✅ PERF: usamos la geometría compartida y escalamos
   const box = new THREE.Mesh(
     SHARED_BOX_GEO,
-    new THREE.MeshBasicMaterial({ color })
+    new THREE.MeshBasicMaterial({ color, fog: false })
   );
   box.scale.set(size, size, size);
   group.add(box);
 
-  const labelSprite = makeTextSprite(label, "#ffffff", labelColor, 10, 5);
+  // ⚡ Etiqueta con tamaño proporcional más pequeño
+  const labelSprite = makeTextSprite(label, "#ffffff", labelColor, 8, 4);
   labelSprite.position.set(0, size * 1.3, 0);
   group.add(labelSprite);
   return group;
 }
 
-// ✅ PERF: Esfera con muy pocos segmentos (antes 20x20 = 800 triángulos, ahora 8x6 = ~100)
-const SHARED_SPHERE_GEO = new THREE.SphereGeometry(1, 8, 6);
-
+// ⚡ Marcador del laboratorio SIN esfera (era solo decorativa y añadía triángulos)
 function makeTargetMarker() {
   const group = new THREE.Group();
 
   const box = new THREE.Mesh(
     SHARED_BOX_GEO,
-    new THREE.MeshBasicMaterial({ color: 0xff00ff })
+    new THREE.MeshBasicMaterial({ color: 0xff00ff, fog: false })
   );
   box.scale.set(12, 12, 12);
   group.add(box);
 
-  // ✅ PERF: Esfera negra low-poly
+  // ⚡ En vez de esfera, un cubo pequeño negro (mucho más barato de renderizar)
   const dot = new THREE.Mesh(
-    SHARED_SPHERE_GEO,
-    new THREE.MeshBasicMaterial({ color: 0x000000 })
+    SHARED_BOX_GEO,
+    new THREE.MeshBasicMaterial({ color: 0x000000, fog: false })
   );
-  dot.scale.set(3.5, 3.5, 3.5);
+  dot.scale.set(4, 4, 4);
   dot.position.set(0, 14, 0);
   group.add(dot);
 
-  const labelSprite = makeTextSprite("LABORATORIO", "#ffffff", "#ff00ff", 22, 11);
+  const labelSprite = makeTextSprite("LABORATORIO", "#ffffff", "#ff00ff", 18, 9);
   labelSprite.position.set(0, 26, 0);
   group.add(labelSprite);
   return group;
@@ -143,15 +148,17 @@ btn.addEventListener("click", async () => {
       showVideoBackground: true,
       cameraOptions: {
         hFov: 80,
-        near: 0.001,
-        far: 500
+        near: 0.01,     // ⚡ antes 0.001. Menos rango del depth buffer.
+        far: 300        // ⚡ antes 500. La escena es pequeña.
       },
       videoConstraints: {
         video: {
           facingMode: "environment",
-          // ✅ PERF: resolución aún más baja para máxima fluidez
-          width:  { ideal: 480 },
-          height: { ideal: 360 }
+          // ⚡ MÁS agresivo: 320×240. El video se sube a la GPU cada frame,
+          //    así que bajar la resolución tiene impacto DIRECTAMENTE proporcional.
+          width:  { ideal: 320 },
+          height: { ideal: 240 },
+          frameRate: { ideal: 24, max: 30 } // ⚡ cap a 24 FPS
         }
       }
     });
@@ -179,8 +186,13 @@ btn.addEventListener("click", async () => {
       }
     }
 
+    // ⚡⚡ LA OPTIMIZACIÓN MÁS GRANDE: bajar la resolución de render.
+    //    Un pixelRatio de 0.6 reduce el trabajo del GPU a ~36% del original.
     if (app.renderer) {
-      app.renderer.setPixelRatio(1);
+      app.renderer.setPixelRatio(0.6);
+      // Apagar cosas que no usamos:
+      app.renderer.shadowMap.enabled = false;
+      app.renderer.sortObjects = false;
     }
 
     // Localizar cámara de Three.js
@@ -193,22 +205,20 @@ btn.addEventListener("click", async () => {
       });
     }
 
-    // ✅ PERF: Cubo brújula con geometría compartida
+    // ⚡ Cubo brújula
     let compassCube = null;
     if (camera3D) {
       compassCube = new THREE.Mesh(
         SHARED_BOX_GEO,
-        new THREE.MeshBasicMaterial({ color: 0xff0000 })
+        new THREE.MeshBasicMaterial({ color: 0xff0000, fog: false, depthTest: false })
       );
       compassCube.scale.set(0.35, 0.35, 0.35);
       compassCube.position.set(0, -0.4, -1.5);
-      // ✅ PERF: deshabilitar frustum culling, ya que está pegado a la cámara
       compassCube.frustumCulled = false;
       camera3D.add(compassCube);
     }
 
-    // ✅ PERF: setInterval a 8 FPS en vez de requestAnimationFrame a 60 FPS.
-    //    El color cambia igual de bien y no compite con el render de LocAR.
+    // ⚡ Actualizar el cubo brújula a 4 FPS (suficiente para cambios de color)
     let lastCardinal = null;
     if (camera3D && compassCube) {
       setInterval(() => {
@@ -217,7 +227,7 @@ btn.addEventListener("click", async () => {
           compassCube.material.color.setHex(DIR_COLORS[dir]);
           lastCardinal = dir;
         }
-      }, 125); // 8 veces por segundo
+      }, 250);
     }
 
     locar.setGpsOptions({
@@ -268,7 +278,7 @@ btn.addEventListener("click", async () => {
         }
 
         objectsAdded = true;
-        setStatus("✅ GPS inicial recibido. Gira 360° y observa el cubo brújula.");
+        setStatus("✅ Listo. Gira 360° y observa el cubo brújula.");
         btn.style.display = "none";
       }
     });
