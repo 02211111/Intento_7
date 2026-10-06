@@ -30,111 +30,25 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-// ⚡ Canvas de etiqueta MÁS PEQUEÑO (256x128 en vez de 512x256)
-//    Eso reduce a la mitad el ancho/alto de la textura → 4× menos píxeles → GPU respira.
-function makeTextSprite(text, textColor = "#ffffff", borderColor = "#ffffff", scaleX = 8, scaleY = 4) {
-  const c = document.createElement("canvas");
-  c.width = 256;   // ⚡ antes 512
-  c.height = 128;  // ⚡ antes 256
-  const ctx = c.getContext("2d");
-
-  ctx.fillStyle = "rgba(0,0,0,0.85)";
-  ctx.fillRect(0, 0, c.width, c.height);
-
-  ctx.strokeStyle = borderColor;
-  ctx.lineWidth = 6;
-  ctx.strokeRect(3, 3, c.width - 6, c.height - 6);
-
-  ctx.fillStyle = textColor;
-  ctx.font = "bold 55px Arial"; // ⚡ proporcional al nuevo tamaño
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText(text, c.width / 2, c.height / 2);
-
-  const texture = new THREE.CanvasTexture(c);
-  texture.needsUpdate = true;
-  // ⚡ Sin mipmaps ni filtros caros:
-  texture.generateMipmaps = false;
-  texture.minFilter = THREE.LinearFilter;
-  texture.magFilter = THREE.LinearFilter;
-
-  const material = new THREE.SpriteMaterial({
-    map: texture,
-    transparent: true,
-    depthTest: false,
-    depthWrite: false
-  });
-
-  const sprite = new THREE.Sprite(material);
-  sprite.scale.set(scaleX, scaleY, 1);
-  return sprite;
+function makeBox(color, size = 10) {
+  return new THREE.Mesh(
+    new THREE.BoxGeometry(size, size, size),
+    new THREE.MeshBasicMaterial({ color })
+  );
 }
 
-// ⚡ Geometrías compartidas (una sola en memoria para todos los cubos)
-const SHARED_BOX_GEO = new THREE.BoxGeometry(1, 1, 1);
-
-function makeCubeWithLabel(color, label, labelColor, size = 10) {
-  const group = new THREE.Group();
-
-  const box = new THREE.Mesh(
-    SHARED_BOX_GEO,
-    new THREE.MeshBasicMaterial({ color, fog: false })
-  );
-  box.scale.set(size, size, size);
-  group.add(box);
-
-  // ⚡ Etiqueta con tamaño proporcional más pequeño
-  const labelSprite = makeTextSprite(label, "#ffffff", labelColor, 8, 4);
-  labelSprite.position.set(0, size * 1.3, 0);
-  group.add(labelSprite);
-  return group;
-}
-
-// ⚡ Marcador del laboratorio SIN esfera (era solo decorativa y añadía triángulos)
-function makeTargetMarker() {
-  const group = new THREE.Group();
-
-  const box = new THREE.Mesh(
-    SHARED_BOX_GEO,
-    new THREE.MeshBasicMaterial({ color: 0xff00ff, fog: false })
-  );
-  box.scale.set(12, 12, 12);
-  group.add(box);
-
-  // ⚡ En vez de esfera, un cubo pequeño negro (mucho más barato de renderizar)
-  const dot = new THREE.Mesh(
-    SHARED_BOX_GEO,
-    new THREE.MeshBasicMaterial({ color: 0x000000, fog: false })
-  );
-  dot.scale.set(4, 4, 4);
-  dot.position.set(0, 14, 0);
-  group.add(dot);
-
-  const labelSprite = makeTextSprite("LABORATORIO", "#ffffff", "#ff00ff", 18, 9);
-  labelSprite.position.set(0, 26, 0);
-  group.add(labelSprite);
-  return group;
-}
-
-const DIR_COLORS = {
-  NORTE: 0xff0000,
-  SUR:   0xffff00,
-  ESTE:  0x00ff00,
-  OESTE: 0x00ffff
-};
-
-function getCardinalFromCamera(camera3D) {
-  const forward = new THREE.Vector3();
-  camera3D.getWorldDirection(forward);
-
-  let heading = Math.atan2(forward.x, forward.z) * 180 / Math.PI;
-  heading = (heading + 360) % 360;
-  heading = (heading + 180) % 360;
-
-  if (heading >= 315 || heading < 45)  return "NORTE";
-  if (heading >= 45  && heading < 135) return "ESTE";
-  if (heading >= 135 && heading < 225) return "SUR";
-  return "OESTE";
+// ✅ NUEVO: Rumbo (bearing) desde el usuario hacia el objetivo
+//    0 = Norte, 90 = Este, 180 = Sur, 270 = Oeste
+function getBearingToTarget(userLat, userLon, targetLat, targetLon) {
+  const toRad = d => d * Math.PI / 180;
+  const toDeg = r => r * 180 / Math.PI;
+  const dLon = toRad(targetLon - userLon);
+  const lat1 = toRad(userLat);
+  const lat2 = toRad(targetLat);
+  const y = Math.sin(dLon) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) -
+            Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+  return (toDeg(Math.atan2(y, x)) + 360) % 360;
 }
 
 btn.addEventListener("click", async () => {
@@ -148,23 +62,23 @@ btn.addEventListener("click", async () => {
       showVideoBackground: true,
       cameraOptions: {
         hFov: 80,
-        near: 0.01,     // ⚡ antes 0.001. Menos rango del depth buffer.
-        far: 300        // ⚡ antes 500. La escena es pequeña.
+        near: 0.001,
+        far: 500
       },
       videoConstraints: {
         video: {
           facingMode: "environment",
-          // ⚡ MÁS agresivo: 320×240. El video se sube a la GPU cada frame,
-          //    así que bajar la resolución tiene impacto DIRECTAMENTE proporcional.
-          width:  { ideal: 320 },
-          height: { ideal: 240 },
-          frameRate: { ideal: 24, max: 30 } // ⚡ cap a 24 FPS
+          width:  { ideal: 640 },
+          height: { ideal: 480 }
         }
       }
     });
 
     app.on("webcamstarted", (ev) => {
-      if (ev && ev.texture) app.scene.background = ev.texture;
+      console.log("Cámara iniciada (evento).");
+      if (ev && ev.texture) {
+        app.scene.background = ev.texture;
+      }
     });
 
     app.on("webcamerror", (err) => {
@@ -181,54 +95,92 @@ btn.addEventListener("click", async () => {
         videoTexture.magFilter = THREE.LinearFilter;
         videoTexture.generateMipmaps = false;
         app.scene.background = videoTexture;
+        console.log("Fondo de video asignado manualmente.");
       } catch (err) {
         console.warn("No se pudo asignar el fondo de video:", err);
       }
     }
 
-    // ⚡⚡ LA OPTIMIZACIÓN MÁS GRANDE: bajar la resolución de render.
-    //    Un pixelRatio de 0.6 reduce el trabajo del GPU a ~36% del original.
     if (app.renderer) {
-      app.renderer.setPixelRatio(0.6);
-      // Apagar cosas que no usamos:
-      app.renderer.shadowMap.enabled = false;
-      app.renderer.sortObjects = false;
+      app.renderer.setPixelRatio(1);
+      console.log("Pixel ratio ajustado a 1.");
     }
 
-    // Localizar cámara de Three.js
+    // ✅ NUEVO: Buscar la cámara 3D de Three.js (para leer hacia dónde miras)
     let camera3D = null;
     if (app.scene && app.scene.camera) camera3D = app.scene.camera;
     else if (app.camera) camera3D = app.camera;
-    else {
+    else if (app.scene) {
       app.scene.traverse(obj => {
         if (obj.isCamera && !camera3D) camera3D = obj;
       });
     }
+    console.log("Cámara 3D encontrada:", !!camera3D);
 
-    // ⚡ Cubo brújula
-    let compassCube = null;
-    if (camera3D) {
-      compassCube = new THREE.Mesh(
-        SHARED_BOX_GEO,
-        new THREE.MeshBasicMaterial({ color: 0xff0000, fog: false, depthTest: false })
+    // ✅ NUEVO: Crear el punto indicador (elemento HTML, cero costo GPU)
+    const dot = document.createElement("div");
+    dot.id = "direction-dot";
+    dot.style.cssText = `
+      position: fixed;
+      z-index: 15;
+      bottom: 80px;
+      left: 50%;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #000;
+      border: 3px solid #fff;
+      transform: translateX(-50%);
+      pointer-events: none;
+      box-shadow: 0 0 12px rgba(0,0,0,0.7);
+      transition: left 0.15s linear, background 0.2s;
+    `;
+    document.body.appendChild(dot);
+
+    // ✅ NUEVO: Guardar la última posición GPS del usuario
+    let lastUserLat = null;
+    let lastUserLon = null;
+
+    // ✅ NUEVO: Actualizar el punto 5 veces por segundo (nada de carga)
+    setInterval(() => {
+      if (!camera3D || lastUserLat === null) return;
+
+      // 1) Dirección en la que mira la cámara (en grados, 0=Norte, 90=Este)
+      const forward = new THREE.Vector3();
+      camera3D.getWorldDirection(forward);
+      let camHeading = Math.atan2(forward.x, forward.z) * 180 / Math.PI;
+      camHeading = (camHeading + 360) % 360;
+      // En Three.js mirar hacia -Z da heading 180; sumamos 180 para que Norte = 0
+      camHeading = (camHeading + 180) % 360;
+
+      // 2) Rumbo hacia el laboratorio
+      const targetBearing = getBearingToTarget(
+        lastUserLat, lastUserLon, TARGET.lat, TARGET.lon
       );
-      compassCube.scale.set(0.35, 0.35, 0.35);
-      compassCube.position.set(0, -0.4, -1.5);
-      compassCube.frustumCulled = false;
-      camera3D.add(compassCube);
-    }
 
-    // ⚡ Actualizar el cubo brújula a 4 FPS (suficiente para cambios de color)
-    let lastCardinal = null;
-    if (camera3D && compassCube) {
-      setInterval(() => {
-        const dir = getCardinalFromCamera(camera3D);
-        if (dir !== lastCardinal) {
-          compassCube.material.color.setHex(DIR_COLORS[dir]);
-          lastCardinal = dir;
-        }
-      }, 250);
-    }
+      // 3) Diferencia (cuánto hay que girar)
+      //    0 = el objetivo está al frente
+      //    +90 = hay que girar a la derecha
+      //    -90 = hay que girar a la izquierda
+      //    ±180 = el objetivo está detrás
+      let delta = targetBearing - camHeading;
+      while (delta > 180) delta -= 360;
+      while (delta < -180) delta += 360;
+
+      // 4) Colocar el punto en pantalla
+      //    Cuando delta=0 el punto va al centro (50%)
+      //    Cuando delta=±90 el punto va al 10% o al 90%
+      const angleRad = delta * Math.PI / 180;
+      const xPercent = 50 + Math.sin(angleRad) * 40;
+      dot.style.left = xPercent + "%";
+
+      // 5) Color: verde si ya estás mirando hacia el objetivo, negro si no
+      if (Math.abs(delta) < 15) {
+        dot.style.background = "#00ff00";
+      } else {
+        dot.style.background = "#000";
+      }
+    }, 200); // 5 Hz
 
     locar.setGpsOptions({
       enableHighAccuracy: false,
@@ -249,6 +201,10 @@ btn.addEventListener("click", async () => {
     locar.on("gpsupdate", (ev) => {
       const c = ev.position.coords;
 
+      // ✅ NUEVO: guardar la posición para el punto indicador
+      lastUserLat = c.latitude;
+      lastUserLon = c.longitude;
+
       coordsEl.textContent =
         `GPS: ${c.latitude.toFixed(7)}, ${c.longitude.toFixed(7)}`;
       accuracyEl.textContent =
@@ -261,24 +217,25 @@ btn.addEventListener("click", async () => {
         `Distancia al Laboratorio: ${Math.round(dist)} m`;
 
       if (!objectsAdded) {
-        const targetMarker = makeTargetMarker();
-        locar.add(targetMarker, TARGET.lon, TARGET.lat, 6);
+        const targetBox = makeBox(0xff00ff, 12);
+        locar.add(targetBox, TARGET.lon, TARGET.lat, 6);
 
         const offset = 0.0001;
+
         const refs = [
-          { dLat:  offset, dLon:  0,      color: 0xff0000, label: "NORTE", labelColor: "#ff0000" },
-          { dLat: -offset, dLon:  0,      color: 0xffff00, label: "SUR",   labelColor: "#ffff00" },
-          { dLat:  0,      dLon: -offset, color: 0x00ffff, label: "OESTE", labelColor: "#00ffff" },
-          { dLat:  0,      dLon:  offset, color: 0x00ff00, label: "ESTE",  labelColor: "#00ff00" }
+          { dLat:  offset, dLon:  0,      color: 0xff0000 },
+          { dLat: -offset, dLon:  0,      color: 0xffff00 },
+          { dLat:  0,      dLon: -offset, color: 0x00ffff },
+          { dLat:  0,      dLon:  offset, color: 0x00ff00 }
         ];
 
         for (const r of refs) {
-          const cubeGroup = makeCubeWithLabel(r.color, r.label, r.labelColor, 10);
-          locar.add(cubeGroup, c.longitude + r.dLon, c.latitude + r.dLat, 5);
+          const box = makeBox(r.color, 10);
+          locar.add(box, c.longitude + r.dLon, c.latitude + r.dLat, 5);
         }
 
         objectsAdded = true;
-        setStatus("✅ Listo. Gira 360° y observa el cubo brújula.");
+        setStatus("✅ GPS inicial recibido. El punto indica dónde está el Laboratorio.");
         btn.style.display = "none";
       }
     });
