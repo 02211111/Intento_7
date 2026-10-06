@@ -30,7 +30,6 @@ function haversineMeters(lat1, lon1, lat2, lon2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-// --- Sprites de texto (ya los teníamos) ---
 function makeTextSprite(text, textColor = "#ffffff", borderColor = "#ffffff", scaleX = 8, scaleY = 4) {
   const c = document.createElement("canvas");
   c.width = 512;
@@ -64,12 +63,18 @@ function makeTextSprite(text, textColor = "#ffffff", borderColor = "#ffffff", sc
   return sprite;
 }
 
+// ✅ PERF: BoxGeometry reutilizable (comparte geometría entre cubos)
+const SHARED_BOX_GEO = new THREE.BoxGeometry(1, 1, 1);
+
 function makeCubeWithLabel(color, label, labelColor, size = 10) {
   const group = new THREE.Group();
+
+  // ✅ PERF: usamos la geometría compartida y escalamos
   const box = new THREE.Mesh(
-    new THREE.BoxGeometry(size, size, size),
+    SHARED_BOX_GEO,
     new THREE.MeshBasicMaterial({ color })
   );
+  box.scale.set(size, size, size);
   group.add(box);
 
   const labelSprite = makeTextSprite(label, "#ffffff", labelColor, 10, 5);
@@ -78,18 +83,25 @@ function makeCubeWithLabel(color, label, labelColor, size = 10) {
   return group;
 }
 
+// ✅ PERF: Esfera con muy pocos segmentos (antes 20x20 = 800 triángulos, ahora 8x6 = ~100)
+const SHARED_SPHERE_GEO = new THREE.SphereGeometry(1, 8, 6);
+
 function makeTargetMarker() {
   const group = new THREE.Group();
+
   const box = new THREE.Mesh(
-    new THREE.BoxGeometry(12, 12, 12),
+    SHARED_BOX_GEO,
     new THREE.MeshBasicMaterial({ color: 0xff00ff })
   );
+  box.scale.set(12, 12, 12);
   group.add(box);
 
+  // ✅ PERF: Esfera negra low-poly
   const dot = new THREE.Mesh(
-    new THREE.SphereGeometry(3.5, 20, 20),
+    SHARED_SPHERE_GEO,
     new THREE.MeshBasicMaterial({ color: 0x000000 })
   );
+  dot.scale.set(3.5, 3.5, 3.5);
   dot.position.set(0, 14, 0);
   group.add(dot);
 
@@ -99,25 +111,19 @@ function makeTargetMarker() {
   return group;
 }
 
-// ✅ NUEVO: Colores por dirección (mismo código que los cubos de calibración)
 const DIR_COLORS = {
-  NORTE: 0xff0000,   // rojo
-  SUR:   0xffff00,   // amarillo
-  ESTE:  0x00ff00,   // verde
-  OESTE: 0x00ffff    // celeste
+  NORTE: 0xff0000,
+  SUR:   0xffff00,
+  ESTE:  0x00ff00,
+  OESTE: 0x00ffff
 };
 
-// ✅ NUEVO: Determina la dirección cardinal a partir del yaw de la cámara
 function getCardinalFromCamera(camera3D) {
   const forward = new THREE.Vector3();
   camera3D.getWorldDirection(forward);
 
-  // Ángulo en grados (0-360)
   let heading = Math.atan2(forward.x, forward.z) * 180 / Math.PI;
   heading = (heading + 360) % 360;
-
-  // Calibración: en Three.js, mirar hacia -Z da heading=180 con atan2(x,z).
-  // Restamos 180 para que el Norte quede en 0.
   heading = (heading + 180) % 360;
 
   if (heading >= 315 || heading < 45)  return "NORTE";
@@ -143,8 +149,9 @@ btn.addEventListener("click", async () => {
       videoConstraints: {
         video: {
           facingMode: "environment",
-          width:  { ideal: 640 },
-          height: { ideal: 480 }
+          // ✅ PERF: resolución aún más baja para máxima fluidez
+          width:  { ideal: 480 },
+          height: { ideal: 360 }
         }
       }
     });
@@ -176,7 +183,7 @@ btn.addEventListener("click", async () => {
       app.renderer.setPixelRatio(1);
     }
 
-    // ✅ NUEVO: Localizar la cámara de Three.js
+    // Localizar cámara de Three.js
     let camera3D = null;
     if (app.scene && app.scene.camera) camera3D = app.scene.camera;
     else if (app.camera) camera3D = app.camera;
@@ -185,29 +192,32 @@ btn.addEventListener("click", async () => {
         if (obj.isCamera && !camera3D) camera3D = obj;
       });
     }
-    console.log("Cámara 3D encontrada:", camera3D);
 
-    // ✅ NUEVO: Crear el cubo brújula como hijo de la cámara (HUD fijo)
+    // ✅ PERF: Cubo brújula con geometría compartida
     let compassCube = null;
     if (camera3D) {
       compassCube = new THREE.Mesh(
-        new THREE.BoxGeometry(0.35, 0.35, 0.35),
+        SHARED_BOX_GEO,
         new THREE.MeshBasicMaterial({ color: 0xff0000 })
       );
-      // 1.5m al frente, un poco abajo del centro
+      compassCube.scale.set(0.35, 0.35, 0.35);
       compassCube.position.set(0, -0.4, -1.5);
+      // ✅ PERF: deshabilitar frustum culling, ya que está pegado a la cámara
+      compassCube.frustumCulled = false;
       camera3D.add(compassCube);
-      console.log("Cubo brújula añadido a la cámara.");
     }
 
-    // ✅ NUEVO: Bucle de actualización de color
+    // ✅ PERF: setInterval a 8 FPS en vez de requestAnimationFrame a 60 FPS.
+    //    El color cambia igual de bien y no compite con el render de LocAR.
+    let lastCardinal = null;
     if (camera3D && compassCube) {
-      const tick = () => {
+      setInterval(() => {
         const dir = getCardinalFromCamera(camera3D);
-        compassCube.material.color.setHex(DIR_COLORS[dir]);
-        requestAnimationFrame(tick);
-      };
-      requestAnimationFrame(tick);
+        if (dir !== lastCardinal) {
+          compassCube.material.color.setHex(DIR_COLORS[dir]);
+          lastCardinal = dir;
+        }
+      }, 125); // 8 veces por segundo
     }
 
     locar.setGpsOptions({
