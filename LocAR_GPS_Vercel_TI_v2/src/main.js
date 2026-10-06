@@ -156,7 +156,7 @@ btn.addEventListener("click", async () => {
       forwardVec.set(0, 0, -1).applyQuaternion(worldQuat);
 
       let camHeading = Math.atan2(forwardVec.x, forwardVec.z) * 180 / Math.PI;
-      camHeading = (camHeading + 360) % 360;
+camHeading = (camHeading + 180 + 360) % 360;  // ✅ +180 de corrección
 
       const targetBearing = getBearingToTarget(
         lastUserLat, lastUserLon, TARGET.lat, TARGET.lon
